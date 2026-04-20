@@ -7,7 +7,7 @@ const API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
 const MODEL = "gemini-2.5-flash-lite"; 
 
 /**
- * Calls Gemini to translate text with cultural context.
+ * Calls Gemini to translate text.
  */
 async function translateText(text, targetLang) {
     const apiKey = config.GEMINI_API_KEY;
@@ -15,12 +15,7 @@ async function translateText(text, targetLang) {
 
     const apiUrl = `${API_BASE_URL}${MODEL}:generateContent?key=${apiKey}`;
 
-    // System instruction to handle English, Swahili, and Sheng accurately
-    const systemPrompt = `You are an expert translator specializing in East African languages. 
-    Translate the user's text into the requested language: ${targetLang}. 
-    If the target is Sheng, make it modern and street-smart (Kenyan style). 
-    If the target is Swahili, make it grammatically correct but natural.
-    Return ONLY the translated text without any extra chat.`;
+    const systemPrompt = `You are an expert translator specializing in East African context. Translate text to ${targetLang}. If target is Sheng, use modern Kenyan slang. Return ONLY the translated text.`;
 
     const payload = {
         contents: [{ parts: [{ text: `Translate this: "${text}" to ${targetLang}` }] }],
@@ -41,34 +36,36 @@ Module(
     {
         pattern: "tr ?(.*)",
         fromMe: false,
-        desc: "Translate text to any language (English, Swahili, Sheng, etc.)",
-        usage: ".tr sheng [text] or .tr english [text]",
+        desc: "Translate text with a clean message edit.",
+        usage: ".tr sheng [text]",
         type: "ai"
     },
     async (message, match) => {
         const input = match[1]?.trim();
-        
-        // Check for correct usage (e.g., .tr sheng how are you)
         const spaceIndex = input.indexOf(' ');
+
         if (spaceIndex === -1) {
-            return await message.sendReply(
-                "🌍 *AI Translator*\n\n" +
-                "*Usage:* `.tr [language] [text]`\n" +
-                "*Example:* `.tr sheng how are you?`\n" +
-                "*Example:* `.tr english mambo sasa`"
-            );
+            return await message.sendReply("🌍 *Usage:* `.tr [lang] [text]`\n*Example:* `.tr sheng come here`.");
         }
 
         const targetLang = input.substring(0, spaceIndex);
         const textToTranslate = input.substring(spaceIndex + 1);
 
-        await message.sendReply(`🌍 _Translating to ${targetLang}..._`);
+        // 1. Send the initial loading message and store it
+        const loadingMsg = await message.sendReply(`🌍 _Translating to ${targetLang}..._`);
 
         try {
+            // 2. Get the translation
             const result = await translateText(textToTranslate, targetLang);
-            await message.sendReply(`*🌍 Translation (${targetLang}):*\n\n${result}`);
+
+            // 3. Edit the original loading message with the final result
+            // This follows the edit logic from your 'gen' script
+            const finalReply = `*🌍 Translation (${targetLang}):*\n\n${result}`;
+            
+            await message.edit(finalReply, message.jid, loadingMsg.key);
+
         } catch (e) {
-            await message.sendReply(`_❌ Error: ${e.message}_`);
+            await message.edit(`_❌ Error: ${e.message}_`, message.jid, loadingMsg.key);
         }
     }
 );
