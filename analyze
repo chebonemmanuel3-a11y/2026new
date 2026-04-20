@@ -1,0 +1,92 @@
+const { Module } = require("../main");
+const config = require("../config");
+const axios = require("axios");
+
+// --- API Configuration ---
+const API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+const MODEL = "gemini-2.5-flash-lite"; 
+
+/**
+ * Calls Gemini to analyze either Text or an Image.
+ */
+async function analyzeContent(text, imageData = null, mimeType = null) {
+    const apiKey = config.GEMINI_API_KEY;
+    const apiUrl = `${API_BASE_URL}${MODEL}:generateContent?key=${apiKey}`;
+
+    const systemPrompt = "You are an expert analyzer. If it is text, explain the meaning, tone, and context (Sheng/Swahili aware). If it is an image, describe it in detail, identify objects, and read any text found in it. Be concise but insightful.";
+
+    let payload = {
+        contents: [{
+            parts: []
+        }],
+        systemInstruction: { parts: [{ text: systemPrompt }] }
+    };
+
+    // Add text to payload
+    payload.contents[0].parts.push({ text: text || "Analyze this content." });
+
+    // Add image if provided (Base64)
+    if (imageData) {
+        payload.contents[0].parts.push({
+            inlineData: {
+                mimeType: mimeType,
+                data: imageData
+            }
+        });
+    }
+
+    try {
+        const response = await axios.post(apiUrl, payload);
+        return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "_❌ Analysis failed._";
+    } catch (error) {
+        return `_❌ API Error: ${error.message}_`;
+    }
+}
+
+// --- Command Module Definition (.analyze) ---
+
+Module(
+    {
+        pattern: "analyze ?(.*)",
+        fromMe: false,
+        desc: "Analyze a replied text or image using AI.",
+        type: "ai"
+    },
+    async (message, match) => {
+        // 1. Check if the user is replying to something
+        if (!message.reply_message) {
+            return await message.sendReply("_Reply to a message or an image with .analyze to use this command!_");
+        }
+
+        const loadingMsg = await message.sendReply("🔍 _Analyzing... hold on tight..._");
+
+        try {
+            let result = "";
+            const quoted = message.reply_message;
+
+            // 2. Check if the replied message is an IMAGE
+            if (quoted.image) {
+                // Download the image and convert to Base64
+                const media = await quoted.download();
+                const base64Image = media.toString('base64');
+                const mimeType = "image/jpeg"; // Most common for WhatsApp
+
+                result = await analyzeContent(match[1] || "What is in this image?", base64Image, mimeType);
+            } 
+            // 3. Check if it's just TEXT
+            else if (quoted.text) {
+                result = await analyzeContent(`Analyze this text: "${quoted.text}". Additional context: ${match[1] || "None"}`);
+            } 
+            else {
+                result = "_❌ I can only analyze text or images for now!_";
+            }
+
+            // 4. Edit the loading message with the result
+            await message.edit(`*🧐 ANALYSIS:* \n\n${result}`, message.jid, loadingMsg.key);
+
+        } catch (e) {
+            console.error(e);
+            await message.edit(`_❌ Error during analysis: ${e.message}_`, message.jid, loadingMsg.key);
+        }
+    }
+);
