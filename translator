@@ -1,0 +1,74 @@
+const { Module } = require("../main");
+const config = require("../config");
+const axios = require("axios");
+
+// --- API Configuration ---
+const API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+const MODEL = "gemini-2.5-flash-lite"; 
+
+/**
+ * Calls Gemini to translate text with cultural context.
+ */
+async function translateText(text, targetLang) {
+    const apiKey = config.GEMINI_API_KEY;
+    if (!apiKey) return "_❌ API Key not found._";
+
+    const apiUrl = `${API_BASE_URL}${MODEL}:generateContent?key=${apiKey}`;
+
+    // System instruction to handle English, Swahili, and Sheng accurately
+    const systemPrompt = `You are an expert translator specializing in East African languages. 
+    Translate the user's text into the requested language: ${targetLang}. 
+    If the target is Sheng, make it modern and street-smart (Kenyan style). 
+    If the target is Swahili, make it grammatically correct but natural.
+    Return ONLY the translated text without any extra chat.`;
+
+    const payload = {
+        contents: [{ parts: [{ text: `Translate this: "${text}" to ${targetLang}` }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+    };
+
+    try {
+        const response = await axios.post(apiUrl, payload);
+        return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "_❌ Translation failed._";
+    } catch (error) {
+        return `_❌ Error: ${error.message}_`;
+    }
+}
+
+// --- Command Module Definition (.tr) ---
+
+Module(
+    {
+        pattern: "tr ?(.*)",
+        fromMe: false,
+        desc: "Translate text to any language (English, Swahili, Sheng, etc.)",
+        usage: ".tr sheng [text] or .tr english [text]",
+        type: "ai"
+    },
+    async (message, match) => {
+        const input = match[1]?.trim();
+        
+        // Check for correct usage (e.g., .tr sheng how are you)
+        const spaceIndex = input.indexOf(' ');
+        if (spaceIndex === -1) {
+            return await message.sendReply(
+                "🌍 *AI Translator*\n\n" +
+                "*Usage:* `.tr [language] [text]`\n" +
+                "*Example:* `.tr sheng how are you?`\n" +
+                "*Example:* `.tr english mambo sasa`"
+            );
+        }
+
+        const targetLang = input.substring(0, spaceIndex);
+        const textToTranslate = input.substring(spaceIndex + 1);
+
+        await message.sendReply(`🌍 _Translating to ${targetLang}..._`);
+
+        try {
+            const result = await translateText(textToTranslate, targetLang);
+            await message.sendReply(`*🌍 Translation (${targetLang}):*\n\n${result}`);
+        } catch (e) {
+            await message.sendReply(`_❌ Error: ${e.message}_`);
+        }
+    }
+);
