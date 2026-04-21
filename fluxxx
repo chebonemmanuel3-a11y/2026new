@@ -1,60 +1,96 @@
 const { Module } = require("../main");
+const config = require("../config");
 const axios = require("axios");
 
-// --- Configuration ---
-// Puter.js allows access to Flux models without personal API keys.
-const PUTER_API_URL = "https://api.puter.com/v1/ai/txt2img"; 
+// --- API Configuration ---
+// Using Together AI for Flux Schnell (Fast & High Quality)
+const FLUX_API_URL = "https://api.together.xyz/v1/images/generations";
 
 /**
- * Generates an image using Flux via Puter.js
+ * Generates an image using Flux AI via Together AI.
  */
 async function generateFluxImage(prompt) {
+    const apiKey = config.FLUX_API_KEY;
+    
+    // Logic check: If key is missing, return a specific warning string
+    if (!apiKey || apiKey === "your_api_key_here") {
+        return "MISSING_KEY";
+    }
+
     try {
-        // Flux.1 Schnell is optimized for speed (~1-2 seconds).
-        const response = await axios.post(PUTER_API_URL, {
+        const response = await axios.post(FLUX_API_URL, {
+            model: "black-forest-labs/FLUX.1-schnell",
             prompt: prompt,
-            model: "black-forest-labs/flux.1-schnell", 
             width: 1024,
-            height: 1024
+            height: 1024,
+            steps: 4,
+            n: 1,
+            response_format: "url"
         }, {
-            // Puter's keyless integration often uses session-based or public tokens
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
             timeout: 40000
         });
 
-        // Puter returns the image element or URL directly.
-        return response.data?.url || response.data?.image_url;
+        return response.data?.data[0]?.url || null;
     } catch (error) {
-        console.error("Flux Error:", error.message);
-        return null;
+        console.error("Flux API Error:", error.response?.data || error.message);
+        return "ERROR";
     }
 }
+
+// --- Command Module (.flux) ---
 
 Module(
     {
         pattern: "flux ?(.*)",
-        desc: "Generate high-quality images using Flux (No Key Required).",
-        use: "ai"
+        desc: "Generate images using Flux AI with auto-key detection.",
+        use: "ai",
+        usage: ".flux a futuristic Nairobi"
     },
     async (message, match) => {
         const prompt = match[1]?.trim();
-        if (!prompt) return await message.sendReply("🎨 Provide a prompt! Example: `.flux a cyber-matatu in Nairobi`.");
 
-        const loading = await message.sendReply(`🎨 _Flux is painting your vision..._`);
+        if (!prompt) {
+            return await message.sendReply("🎨 *Flux AI Generator*\n\nUsage: `.flux [your prompt]`\nExample: `.flux a cyber-matatu in a neon city`.");
+        }
+
+        const loading = await message.sendReply(`🎨 _Flux is starting to paint..._`);
 
         try {
-            const imageUrl = await generateFluxImage(prompt);
-            if (imageUrl) {
-                await message.sendMessage({ url: imageUrl }, "image", {
+            const result = await generateFluxImage(prompt);
+
+            // Case 1: Missing API Key
+            if (result === "MISSING_KEY") {
+                const helpMsg = 
+                    `*⚠️ FLUX_API_KEY NOT FOUND*\n\n` +
+                    `To use this command, you need a Together AI API key.\n\n` +
+                    `1. Get a key at: *https://api.together.ai*\n` +
+                    `2. Set it using this command:\n` +
+                    `\`.setvar FLUX_API_KEY: your_key_here\`\n\n` +
+                    `_Then restart the bot and try again!_`;
+                
+                return await message.edit(helpMsg, message.jid, loading.key);
+            }
+
+            // Case 2: Success
+            if (result && result !== "ERROR") {
+                await message.sendMessage({ url: result }, "image", {
                     caption: `*🔥 Flux AI Output*\n\n_Prompt: ${prompt}_`,
                     quoted: message
                 });
-                await message.edit("✅ _Done!_", message.jid, loading.key);
-            } else {
-                await message.edit("❌ _Generation failed. Try again._", message.jid, loading.key);
+                return await message.edit("✅ _Image Sent!_", message.jid, loading.key);
+            } 
+            
+            // Case 3: General API Error
+            else {
+                return await message.edit("❌ _Flux API is currently busy or error occurred. Try again later._", message.jid, loading.key);
             }
+
         } catch (e) {
-            await message.edit(`_❌ Error: ${e.message}_`, message.jid, loading.key);
+            await message.edit(`_❌ Critical Error: ${e.message}_`, message.jid, loading.key);
         }
     }
 );
